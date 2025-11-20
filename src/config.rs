@@ -1,6 +1,9 @@
 // src/config.rs
 use serde::Deserialize;
-use std::{fs, path::Path, path::PathBuf};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +50,20 @@ pub enum ConfigError {
 
     #[error("Invalid configuration: {0}")]
     Invalid(String),
+
+    #[error("Source `{name}`: file not found at `{path}`")]
+    SourceFileNotFound { name: String, path: String },
+
+    #[error("Source `{name}`: `{path}` is not a regular file")]
+    SourceNotAFile { name: String, path: String },
+
+    #[error("Source `{name}`: cannot access `{path}`: {source}")]
+    SourceIo {
+        name: String,
+        path: String,
+        #[source]
+        source: io::Error,
+    },
 }
 
 impl Config {
@@ -92,13 +109,57 @@ impl Config {
         }
 
         self.dedup_sources_by_name();
+        self.validate_source_paths()?;
 
         Ok(())
     }
 
+    /// Deduplicate sources by name, keeping the first occurrence.
     fn dedup_sources_by_name(&mut self) {
         use std::collections::HashSet;
         let mut seen = HashSet::new();
         self.sources.retain(|s| seen.insert(s.name.clone()));
+    }
+
+    /// Validate that each source path exists and is a regular file.
+    fn validate_source_paths(&self) -> Result<(), ConfigError> {
+        use std::io::ErrorKind;
+
+        for s in &self.sources {
+            let name = s.name.clone();
+            let path_str = s.path.display().to_string();
+
+            let meta = match fs::metadata(&s.path) {
+                Ok(m) => m,
+                Err(e) => {
+                    return match e.kind() {
+                        ErrorKind::NotFound => Err(ConfigError::SourceFileNotFound {
+                            name,
+                            path: path_str,
+                        }),
+                        ErrorKind::PermissionDenied => Err(ConfigError::SourceIo {
+                            name,
+                            path: path_str,
+                            source: e,
+                        }),
+                        // Other kinds of errors (e.g., I/O errors)
+                        _ => Err(ConfigError::SourceIo {
+                            name,
+                            path: path_str,
+                            source: e,
+                        }),
+                    };
+                }
+            };
+
+            if !meta.is_file() {
+                return Err(ConfigError::SourceNotAFile {
+                    name,
+                    path: path_str,
+                });
+            }
+        }
+
+        Ok(())
     }
 }
