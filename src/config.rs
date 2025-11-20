@@ -99,7 +99,10 @@ impl Config {
                 return Err(ConfigError::Invalid("Source name cannot be empty.".into()));
             }
 
+            // NOTE:
             // If the path is empty, we can't read anything.
+            // Filesystem paths are not guaranteed to be valid UTF-8,
+            // so we check the OsStr (OS-native string) directly.
             if s.path.as_os_str().is_empty() {
                 return Err(ConfigError::Invalid(format!(
                     "Source `{}` has an empty path.",
