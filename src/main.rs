@@ -1,7 +1,7 @@
 // src/main.rs
 mod config;
 
-use crate::config::{Config, ConfigError};
+use crate::config::{Config, ConfigError, SourceKind};
 use std::env;
 use std::path::Path;
 
@@ -26,9 +26,25 @@ fn run() -> Result<(), ConfigError> {
     println!("  include: {:?}", cfg.include);
     println!("  exclude: {:?}", cfg.exclude);
     println!("  sources:");
-    for s in &cfg.sources {
-        println!("    - {} -> {}", s.name, s.path.display());
+    for src in &cfg.sources {
+        print_source(src);
     }
 
     Ok(())
+}
+
+fn print_source(src: &config::SourceConfig) {
+    match &src.kind {
+        SourceKind::File { path } => {
+            println!("    - name: {}", src.name);
+            println!("      type: file");
+            println!("      path: {}", path.display());
+        }
+        SourceKind::Command { command, args } => {
+            println!("    - name: {}", src.name);
+            println!("      type: command");
+            println!("      command: {}", command);
+            println!("      args: {:?}", args);
+        }
+    }
 }

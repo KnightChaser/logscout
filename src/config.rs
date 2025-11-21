@@ -28,8 +28,22 @@ pub struct SourceConfig {
     /// Human-friendly name, printed in output.
     pub name: String,
 
-    /// Path to the log file.
-    pub path: PathBuf,
+    #[serde(flatten)]
+    pub kind: SourceKind,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")] // "file" or "command"
+pub enum SourceKind {
+    #[serde(rename = "file")]
+    File { path: PathBuf },
+
+    #[serde(rename = "command")]
+    Command {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -57,10 +71,22 @@ pub enum ConfigError {
     #[error("Source `{name}`: `{path}` is not a regular file")]
     SourceNotAFile { name: String, path: String },
 
+    #[error("Source `{name}`: command is empty")]
+    SourceCommandEmpty { name: String },
+
     #[error("Source `{name}`: cannot access `{path}`: {source}")]
     SourceIo {
         name: String,
         path: String,
+        #[source]
+        source: io::Error,
+    },
+
+    #[allow(dead_code)]
+    #[error("Source `{name}`: failed to spawn command `{command}`: {source}")]
+    SourceSpawn {
+        name: String,
+        command: String,
         #[source]
         source: io::Error,
     },
@@ -98,21 +124,10 @@ impl Config {
             if s.name.trim().is_empty() {
                 return Err(ConfigError::Invalid("Source name cannot be empty.".into()));
             }
-
-            // NOTE:
-            // If the path is empty, we can't read anything.
-            // Filesystem paths are not guaranteed to be valid UTF-8,
-            // so we check the OsStr (OS-native string) directly.
-            if s.path.as_os_str().is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "Source `{}` has an empty path.",
-                    s.name
-                )));
-            }
         }
 
         self.dedup_sources_by_name();
-        self.validate_source_paths()?;
+        self.validate_sources()?;
 
         Ok(())
     }
@@ -124,42 +139,54 @@ impl Config {
         self.sources.retain(|s| seen.insert(s.name.clone()));
     }
 
-    /// Validate that each source path exists and is a regular file.
-    fn validate_source_paths(&self) -> Result<(), ConfigError> {
+    /// Validate that sources are accessible and valid.
+    fn validate_sources(&self) -> Result<(), ConfigError> {
         use std::io::ErrorKind;
 
         for s in &self.sources {
-            let name = s.name.clone();
-            let path_str = s.path.display().to_string();
+            match &s.kind {
+                // Check that the given log file exists and is a regular file.
+                SourceKind::File { path } => {
+                    let name = s.name.clone();
+                    let path_str = path.display().to_string();
 
-            let meta = match fs::metadata(&s.path) {
-                Ok(m) => m,
-                Err(e) => {
-                    return match e.kind() {
-                        ErrorKind::NotFound => Err(ConfigError::SourceFileNotFound {
-                            name,
-                            path: path_str,
-                        }),
-                        ErrorKind::PermissionDenied => Err(ConfigError::SourceIo {
-                            name,
-                            path: path_str,
-                            source: e,
-                        }),
-                        // Other kinds of errors (e.g., I/O errors)
-                        _ => Err(ConfigError::SourceIo {
-                            name,
-                            path: path_str,
-                            source: e,
-                        }),
+                    let meta = match fs::metadata(path) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            return match e.kind() {
+                                ErrorKind::NotFound => Err(ConfigError::SourceFileNotFound {
+                                    name,
+                                    path: path_str,
+                                }),
+                                ErrorKind::PermissionDenied => Err(ConfigError::SourceIo {
+                                    name,
+                                    path: path_str,
+                                    source: e,
+                                }),
+                                _ => Err(ConfigError::SourceIo {
+                                    name,
+                                    path: path_str,
+                                    source: e,
+                                }),
+                            }?;
+                        }
                     };
+                    if !meta.is_file() {
+                        return Err(ConfigError::SourceNotAFile {
+                            name,
+                            path: path_str,
+                        });
+                    }
                 }
-            };
 
-            if !meta.is_file() {
-                return Err(ConfigError::SourceNotAFile {
-                    name,
-                    path: path_str,
-                });
+                // Check that the command is not empty. (Later we try to spawn it to verify.)
+                SourceKind::Command { command, .. } => {
+                    if command.trim().is_empty() {
+                        return Err(ConfigError::SourceCommandEmpty {
+                            name: s.name.clone(),
+                        });
+                    }
+                }
             }
         }
 
