@@ -9,18 +9,22 @@ follow: true
 include:
   - "ERROR"
   - "CRITICAL"
+  - "CREATE"
+  - "DELETE"
 
 exclude:
   - "healthcheck"
   - "metrics"
+  - ".swp"
 
 sources:
-  - name: "pacman"
-    path: "/var/log/pacman.log"
+  - name: "auditd"
+    type: "file"
+    path: "/var/log/audit/audit.log"
 
-  - name: "nginx-access"
-    path: "/var/log/nginx/access.log"
+  - name: "tmp-inotify"
+    type: "command"
+    command: "inotifywait"
+    args: ["-m", "-r", "/tmp"]
 
-  - name: "nginx-error"
-    path: "/var/log/nginx/error.log"
 ```
