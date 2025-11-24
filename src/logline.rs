@@ -10,5 +10,5 @@ pub struct LogLine {
     pub line: String,
 
     /// When we read it
-    pub tiemestamp: SystemTime,
+    pub timestamp: SystemTime,
 }
