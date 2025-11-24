@@ -11,7 +11,7 @@ use std::sync::mpsc;
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("log-scout: error: {err}");
+        eprintln!("[logscout]: error: {err}");
         std::process::exit(1);
     }
 }
