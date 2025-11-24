@@ -6,7 +6,8 @@ use std::{
 };
 use thiserror::Error;
 
-#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     /// Whether to follow files like `tail -F`.
     pub follow: bool,
@@ -23,7 +24,7 @@ pub struct Config {
     pub sources: Vec<SourceConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct SourceConfig {
     /// Human-friendly name, printed in output.
     pub name: String,
@@ -32,7 +33,7 @@ pub struct SourceConfig {
     pub kind: SourceKind,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "type")] // "file" or "command"
 pub enum SourceKind {
     #[serde(rename = "file")]
