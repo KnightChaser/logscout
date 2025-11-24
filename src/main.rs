@@ -9,7 +9,11 @@ use crate::filters::Filters;
 use crate::logline::LogLine;
 use std::env;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 
 fn main() {
     if let Err(err) = run() {
@@ -30,15 +34,33 @@ fn run() -> Result<(), ConfigError> {
     // Build filters (can fil if regex is invalid)
     let filters = Filters::from_config(&cfg)?;
 
+    // Shared shutdown flag (Ctrl+C)
+    let shutdown = Arc::new(AtomicBool::new(false));
+    {
+        let shutdown_flag = shutdown.clone();
+        ctrlc::set_handler(move || {
+            // Only print on first [Ctrl]+[C]
+            let first = !shutdown_flag.swap(true, Ordering::SeqCst);
+            if first {
+                println!("\n[logscout] Shutdown signal received, terminating...");
+            }
+        })
+        .expect("[logscout] Error setting Ctrl-C handler");
+    }
+
     // Set up channels
     let (tx, rx) = mpsc::channel::<LogLine>();
 
-    // Spawn reader threads for all source
-    let _handles = reader::spawn_readers(&cfg.sources, tx);
+    // Spawn reader threads for all source with shutdown flag
+    let _handles = reader::spawn_readers(&cfg.sources, tx, shutdown.clone());
 
     // Consume data
     println!("[logscout] Waiting for log lines...");
     for msg in rx {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+
         if filters.matches(&msg.line) {
             println!("[{}] {}", msg.source, msg.line);
         }

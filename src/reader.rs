@@ -5,25 +5,34 @@ use crate::logline::LogLine;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use std::sync::mpsc::Sender;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc::Sender,
+};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::SystemTime;
 
 /// Spawn one reader thread per source.
 /// Returns the join handles
-pub fn spawn_readers(sources: &[SourceConfig], tx: Sender<LogLine>) -> Vec<JoinHandle<()>> {
+pub fn spawn_readers(
+    sources: &[SourceConfig],
+    tx: Sender<LogLine>,
+    shutdown: Arc<AtomicBool>,
+) -> Vec<JoinHandle<()>> {
     let mut handles = Vec::new();
 
     for src in sources {
         let name = src.name.clone();
         let kind = src.kind.clone();
         let tx_clone = tx.clone(); // Multiple threads need their own sender
+        let shutdown_clone = shutdown.clone();
 
         let handle = match kind {
-            SourceKind::File { path } => spawn_file_reader(name, path, tx_clone),
+            SourceKind::File { path } => spawn_file_reader(name, path, tx_clone, shutdown_clone),
             SourceKind::Command { command, args } => {
-                spawn_command_reader(name, command, args, tx_clone)
+                spawn_command_reader(name, command, args, tx_clone, shutdown_clone)
             }
         };
 
@@ -38,6 +47,7 @@ fn spawn_file_reader(
     name: String,
     path: std::path::PathBuf,
     tx: Sender<LogLine>,
+    shutdown: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         // This can still fail at runtime (file removed/permissions changed)
@@ -57,6 +67,9 @@ fn spawn_file_reader(
         let reader = BufReader::new(file);
 
         for line_result in reader.lines() {
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
             let line = match line_result {
                 Ok(l) => l,
                 Err(e) => {
@@ -88,6 +101,7 @@ fn spawn_command_reader(
     command: String,
     args: Vec<String>,
     tx: Sender<LogLine>,
+    shutdown: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         // Execute the command and capture its stdout
@@ -121,6 +135,9 @@ fn spawn_command_reader(
         let reader = BufReader::new(stdout);
 
         for line_result in reader.lines() {
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
             let line = match line_result {
                 Ok(l) => l,
                 Err(e) => {
@@ -141,6 +158,11 @@ fn spawn_command_reader(
             if tx.send(msg).is_err() {
                 break; // Receiver has been dropped
             }
+        }
+
+        // If we're shutting down, kill the child process so it doesn't linger!
+        if shutdown.load(Ordering::Relaxed) {
+            let _ = child.kill();
         }
 
         // Wait for the child to exit; ignore status for now
