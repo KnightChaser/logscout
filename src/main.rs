@@ -1,6 +1,7 @@
 // src/main.rs
 mod config;
 mod logline;
+mod reader;
 
 use crate::config::{Config, ConfigError, SourceKind};
 use crate::logline::LogLine;
@@ -25,33 +26,14 @@ fn run() -> Result<(), ConfigError> {
     let cfg = Config::from_file(path)?;
 
     let (tx, rx) = mpsc::channel::<LogLine>();
-    let _tx = tx;
-    let _rx = rx;
 
-    println!("Loaded config from `{}`:", path.display());
-    println!("  follow: {}", cfg.follow);
-    println!("  include: {:?}", cfg.include);
-    println!("  exclude: {:?}", cfg.exclude);
-    println!("  sources:");
-    for src in &cfg.sources {
-        print_source(src);
+    let _handles = reader::spawn_readers(&cfg.sources, tx);
+
+    // Consume data
+    println!("[logscout] Waiting for log lines...");
+    for msg in rx {
+        println!("[{}] {}", msg.source, msg.line);
     }
 
     Ok(())
-}
-
-fn print_source(src: &config::SourceConfig) {
-    match &src.kind {
-        SourceKind::File { path } => {
-            println!("    - name: {}", src.name);
-            println!("      type: file");
-            println!("      path: {}", path.display());
-        }
-        SourceKind::Command { command, args } => {
-            println!("    - name: {}", src.name);
-            println!("      type: command");
-            println!("      command: {}", command);
-            println!("      args: {:?}", args);
-        }
-    }
 }
