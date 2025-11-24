@@ -8,6 +8,21 @@ pub struct Filters {
     exclude: Vec<Regex>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterDecision {
+    /// Line matched an exclude regex and then dropped, count as excluded.
+    Excluded,
+
+    /// Line passed and matched an include regex.
+    Included,
+
+    /// Line passed without any include regex match (include list empty).
+    Passed,
+
+    /// Line was dropped because it didn't match any include regex.
+    DroppedNoIncludeMatch,
+}
+
 impl Filters {
     /// Build Filters from Config.[include|exclude].
     /// Every pattern must be a valid regex; otherwise we throw ConfigError
@@ -36,24 +51,36 @@ impl Filters {
         Ok(Self { include, exclude })
     }
 
-    /// Return true if the line **passes** the filters.
+    /// Classify a line according to include/exclude rules.
     ///
     /// Rules:
-    /// - If it matches any exclude regex -> reject (false).
-    /// - Else, if include list is empty -> accept everything (true).
-    /// - Else, accept only if it matches at least one include regex.
-    pub fn matches(&self, line: &str) -> bool {
-        // 1. Exclude has highest priority
+    /// - If it matches any exclude regex -> Excluded
+    /// - Else if include list is empty -> Passed
+    /// - Else if it matches any include regex -> Included
+    /// - Else -> DroppedNoIncludeMatch
+    pub fn classify(&self, line: &str) -> FilterDecision {
+        // Check excludes first
         if self.exclude.iter().any(|re| re.is_match(line)) {
-            return false;
+            return FilterDecision::Excluded;
         }
 
-        // 2. If no include filters, accept everything (except excluded)
+        // Then check includes. If empty, pass all.
         if self.include.is_empty() {
-            return true;
+            return FilterDecision::Passed;
         }
 
-        // 3. Require at least one include to match
-        self.include.iter().any(|re| re.is_match(line))
+        if self.include.iter().any(|re| re.is_match(line)) {
+            FilterDecision::Included
+        } else {
+            FilterDecision::DroppedNoIncludeMatch
+        }
+    }
+
+    /// Convenience wrapper if you only care about "should this be printed?"
+    pub fn matches(&self, line: &str) -> bool {
+        matches!(
+            self.classify(line),
+            FilterDecision::Included | FilterDecision::Passed
+        )
     }
 }
