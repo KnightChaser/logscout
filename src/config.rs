@@ -1,4 +1,5 @@
 // src/config.rs
+use regex::Error;
 use serde::Deserialize;
 use std::{
     fs, io,
@@ -90,6 +91,14 @@ pub enum ConfigError {
         command: String,
         #[source]
         source: io::Error,
+    },
+
+    #[error("Invalid {kind} regex `{pattern}`: {source}")]
+    InvalidRegex {
+        kind: &'static str, // "include" or "exclude"
+        pattern: String,
+        #[source]
+        source: regex::Error,
     },
 }
 

@@ -1,9 +1,11 @@
 // src/main.rs
 mod config;
+mod filters;
 mod logline;
 mod reader;
 
-use crate::config::{Config, ConfigError, SourceKind};
+use crate::config::{Config, ConfigError};
+use crate::filters::Filters;
 use crate::logline::LogLine;
 use std::env;
 use std::path::Path;
@@ -25,14 +27,21 @@ fn run() -> Result<(), ConfigError> {
 
     let cfg = Config::from_file(path)?;
 
+    // Build filters (can fil if regex is invalid)
+    let filters = Filters::from_config(&cfg)?;
+
+    // Set up channels
     let (tx, rx) = mpsc::channel::<LogLine>();
 
+    // Spawn reader threads for all source
     let _handles = reader::spawn_readers(&cfg.sources, tx);
 
     // Consume data
     println!("[logscout] Waiting for log lines...");
     for msg in rx {
-        println!("[{}] {}", msg.source, msg.line);
+        if filters.matches(&msg.line) {
+            println!("[{}] {}", msg.source, msg.line);
+        }
     }
 
     Ok(())
